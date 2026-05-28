@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.io import wavfile
+import librosa 
 
 # Replace audio.wav with your own audio file
 sample_rate, audio = wavfile.read("audio.wav")
