@@ -1,70 +1,63 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import librosa
-from pathlib import Path
+import matplotlib.pyplot as plt # plotting library 
+import librosa # library that analyses audio
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  CONFIG — edit these lists with your actual file names (no extension needed)
-# ─────────────────────────────────────────────────────────────────────────────
 
-AI_FILES = [
-    "AI1", "AI2", "AI3", "AI4", "AI5", "AI6", "AI7",
-]
 
-HUMAN_FILES = [
-    "Human1", "Human2", "Human3", "Human4", "Human5", "Human6", "Human7",
-]
+AI_FILES = ["Ai1.wav", "Ai2.mp3", "Ai3.mp3", "Ai4.wav", "Ai5.wav", "Ai6.wav", "Ai7.wav"]
 
-DURATION_SEC = 5      # seconds of audio to analyse per file
-FFT_SIZE     = None   # None = use full signal length
-ROLLOFF_PERC = 0.85   # spectral rolloff threshold (85%)
+HUMAN_FILES = ["Human1.mp3", "Human2.mp3", "Human3.mp3", "Human4.mp3", "Human5.mp3",
+               "Human6.mp3", "Human7.mp3",]
 
-# ─────────────────────────────────────────────────────────────────────────────
+DURATION_SEC = 5      # seconds of audio to analyse per file, if audio is longer than 10 min,
+# a FFT_size should be implemented here and in function compute_fft. However, since the
+#application does not need more than 10 min to determine AI or human, this was left out. 
 
-# Purpose : Given a filename stem (e.g. "AI1"), searches the current directory
-#           for a matching audio file with any common extension.
-# Input   : stem — filename without extension
-# Output  : full filename string if found, otherwise raises FileNotFoundError
-def resolve_path(stem):
-    for ext in [".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"]:
-        p = Path(stem + ext)
-        if p.exists():
-            return str(p)
-    raise FileNotFoundError(
-        f"No audio file found for '{stem}' — tried .mp3 .wav .flac .ogg .m4a .aac"
-    )
+ROLLOFF_PERC = 0.85   # spectral rolloff threshold, could be changed, however since we are
+# comparing Ai relative to Human, the exact value matters little.
+
+
 
 # Purpose : Reads one audio file from disk, removes silence, and trims it to
-#           a fixed length so every sample is comparable.
+#           a fixed length so every sample is comparable. If there is no audio, 
+#           an error is raised.
 # Input   : filepath     — path to the audio file
-#           duration_sec — how many seconds to keep (default: 5)
+#           duration_sec — how many seconds to keep 
 # Output  : signal — 1-D numpy array of normalised amplitude values
 #           sr     — sample rate in Hz
-def load_audio(filepath, duration_sec=5):
-    signal, sr = librosa.load(filepath, sr=None, mono=True)
+def load_audio(filepath, duration_sec):
+    signal, sample_rate = librosa.load(filepath, sample_rate=None, mono=True)
+    signal, _ = librosa.effects.trim(signal, top_decibel=20)
+
+    N = int(duration_sec * sample_rate)
+    if len(signal) < N:
+        signal = np.pad(signal, (0, N - len(signal)))  
+    else:
+        signal = signal[:N]
+
+    if np.max(np.abs(signal)) == 0:
+        raise ValueError(f"Audio file appears to be silent: {filepath}")
+
     signal = signal / (np.max(np.abs(signal)) + 1e-10)
-    signal, _ = librosa.effects.trim(signal, top_db=20)
-    N = int(duration_sec * sr)
-    signal = signal[:N]
-    signal = signal / (np.max(np.abs(signal)) + 1e-10)
-    return signal, sr
+    return signal, sample_rate
 
 # Purpose : Converts a time-domain signal into the frequency domain using the
 #           Discrete Fourier Transform. A Hann window is applied first to
-#           prevent spectral leakage at the edges of the signal.
+#           prevent spectral leakage at the edges of the signal. Only the positive signals
+#           are evaluated. 
 # Input   : signal — 1-D array of amplitude values (from load_audio)
 #           sr     — sample rate in Hz (from load_audio)
 #           n_fft  — FFT size; if None the full signal length is used
 # Output  : freqs — 1-D array of frequency values in Hz for each FFT bin
 #           mag   — 1-D array of magnitudes (how strong each frequency is)
-def compute_fft(signal, sr, n_fft=None):
+
+def compute_fft(signal, sample_rate):
     N = len(signal)
-    n = n_fft if n_fft else N
-    window = np.hanning(N)
-    dft    = np.fft.fft(signal * window, n=n)
-    mag    = np.abs(dft[: n // 2])
-    freqs  = np.fft.fftfreq(n, d=1 / sr)[: n // 2]
-    return freqs, mag
+    window     = np.hanning(N)
+    dft        = np.fft.fft(signal * window, n=N)
+    magnitude  = np.abs(dft[: N // 2])
+    freqs      = np.fft.fftfreq(N, d=1 / sample_rate)[: N // 2]
+    return freqs, magnitude
 
 # Purpose : Computes all 5 features from the FFT output for exploration.
 #           No classifier is applied here — the goal is just to see the numbers.
@@ -73,34 +66,29 @@ def compute_fft(signal, sr, n_fft=None):
 #           freqs  — 1-D array of frequency values in Hz (from compute_fft)
 #           mag    — 1-D array of FFT magnitudes (from compute_fft)
 # Output  : dictionary with 5 float values, one per feature
-def extract_features(signal, sr, freqs, mag):
-    # 1. Spectral flatness — how noise-like vs tonal the spectrum is
-    mag_safe      = mag + 1e-10
-    geo_mean      = np.exp(np.mean(np.log(mag_safe)))
-    arith_mean    = np.mean(mag_safe)
-    spectral_flat = geo_mean / arith_mean
 
-    # 2. Spectral centroid — centre of mass of the spectrum [Hz]
-    spec_centroid = np.sum(freqs * mag) / (np.sum(mag) + 1e-10)
+def extract_features( freqs, mag):
+    magnitude_safe  = mag + 1e-10
+    geometric_mean  = np.exp(np.mean(np.log(magnitude_safe)))
+    arithmetic_mean = np.mean(magnitude_safe)
+    spectral_flat   = geometric_mean / arithmetic_mean
 
-    # 3. High-frequency energy ratio — fraction of energy above 4 kHz
-    hf_ratio      = np.sum(mag[freqs > 4000]) / (np.sum(mag) + 1e-10)
+    spectral_centroid = np.sum(freqs * mag) / (np.sum(mag))
 
-    # 4. Spectral rolloff — frequency below which 85% of energy sits [Hz]
+    hf_ratio      = np.sum(mag[freqs > 4000]) / (np.sum(mag))
+
     cumsum        = np.cumsum(mag)
     rolloff_idx   = min(np.searchsorted(cumsum, ROLLOFF_PERC * cumsum[-1]), len(freqs) - 1)
     spec_rolloff  = freqs[rolloff_idx]
 
-    # 5. Zero-crossing rate — how often the signal crosses zero per second
-    zcr           = np.mean(librosa.feature.zero_crossing_rate(signal)[0])
+    spec_bandwidth = np.sqrt(np.sum(((freqs - spectral_centroid) ** 2) * mag) / np.sum(mag))
 
     return {
         "spectral_flatness": spectral_flat,
-        "spectral_centroid": spec_centroid,
+        "spectral_centroid": spectral_centroid,
         "high_freq_ratio":   hf_ratio,
         "spectral_rolloff":  spec_rolloff,
-        "zcr":               zcr,
-    }
+        "spectral_bandwidth": spec_bandwidth}
 
 # Purpose : Runs the full pipeline (load → FFT → features) on every file in a
 #           list. No classification is performed — just feature extraction.
@@ -109,26 +97,26 @@ def extract_features(signal, sr, freqs, mag):
 #           label     — "AI" or "Human", stored for reference in the plots
 # Output  : list of result dictionaries, one per file, each containing:
 #             name, label, signal, sr, freqs, mag, feats
+
 def process_files(file_list, label):
     results = []
-    for fp in file_list:
-        name = Path(fp).stem
+    for filepath in file_list:
+        name = filepath.split(".")[0]
         try:
-            signal, sr = load_audio(resolve_path(fp), DURATION_SEC)
-            freqs, mag = compute_fft(signal, sr, FFT_SIZE)
-            feats      = extract_features(signal, sr, freqs, mag)
+            signal, sample_rate = load_audio(filepath, DURATION_SEC)
+            freqs, magnitude = compute_fft(signal, sample_rate)
+            features      = extract_features(freqs, magnitude)
             results.append({
                 "name":   name,
                 "label":  label,
                 "signal": signal,
-                "sr":     sr,
+                "sample_rate":     sample_rate,
                 "freqs":  freqs,
-                "mag":    mag,
-                "feats":  feats,
-            })
+                "magnitude":    magnitude,
+                "features":  features})
             print(f"  [OK] {name}")
         except Exception as e:
-            print(f"  [ERR] {fp}: {e}")
+            print(f"  [ERR] {filepath}: {e}")
     return results
 
 # Purpose : Creates a figure showing every sample's time-domain waveform and

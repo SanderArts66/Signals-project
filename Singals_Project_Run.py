@@ -99,15 +99,7 @@ def classify(features):
     else:
         return "Uncertain"
 
-# Purpose : Shows the time-domain waveform and FFT spectrum side by side for
-#           the single input file.
-# Input   : signal    — 1-D array of amplitude values
-#           sr        — sample rate in Hz
-#           freqs     — frequency array from compute_fft
-#           mag       — magnitude array from compute_fft
-#           name      — filename stem used as the plot title
-#           prediction — classification result string
-# Output  : none — displays a matplotlib figure
+
 def plot_signal(signal, sr, freqs, mag, name, prediction):
     color = "#e84040" if prediction == "AI" else \
             "#40a060" if prediction == "Human" else "#e8a040"
@@ -133,12 +125,7 @@ def plot_signal(signal, sr, freqs, mag, name, prediction):
 
     plt.tight_layout(rect=[0, 0, 1, 0.93])
 
-# Purpose : Prints a small results table to the console showing the two
-#           feature values, their thresholds, and the final prediction.
-# Input   : name       — filename stem
-#           features   — dictionary from extract_features
-#           prediction — classification result string
-# Output  : none — prints to console
+
 def print_results(name, features, prediction):
     print("\n" + "=" * 45)
     print(f"  File       : {name}")
@@ -151,12 +138,15 @@ def print_results(name, features, prediction):
     print("=" * 45 + "\n")
 
 
-if __name__ == "__main__":
+# Main text, runs all te functions. Uses the output from the first function in the second 
+#function.
 
-    name = Path(INPUT_FILE).stem
+if __name__ == "__main__": # Only runs the code if the file is being run directly (safty)
 
-    try:
-        signal, sr = load_audio(resolve_path(INPUT_FILE), DURATION_SEC)
+    name = Path(INPUT_FILE).stem  # Takes the input file name from the top
+
+    try:  # Runs past all the functions
+        signal, sr = load_audio(resolve_path(INPUT_FILE), DURATION_SEC) 
         freqs, mag = compute_fft(signal, sr, FFT_SIZE)
         features   = extract_features(signal, sr, freqs, mag)
         prediction = classify(features)
@@ -165,5 +155,5 @@ if __name__ == "__main__":
         plot_signal(signal, sr, freqs, mag, name, prediction)
         plt.show()
 
-    except FileNotFoundError as e:
+    except FileNotFoundError as e: # Prints an error if resolve_path can't mach the audio file
         print(f"\n[ERROR] {e}")
