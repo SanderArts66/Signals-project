@@ -26,8 +26,8 @@ ROLLOFF_PERC = 0.85   # spectral rolloff threshold, could be changed, however si
 # Output  : signal — 1-D numpy array of normalised amplitude values
 #           sr     — sample rate in Hz
 def load_audio(filepath, duration_sec):
-    signal, sample_rate = librosa.load(filepath, sample_rate=None, mono=True)
-    signal, _ = librosa.effects.trim(signal, top_decibel=20)
+    signal, sample_rate = librosa.load(filepath, sr=None, mono=True)
+    signal, _ = librosa.effects.trim(signal, top_db=20)
 
     N = int(duration_sec * sample_rate)
     if len(signal) < N:
@@ -119,124 +119,57 @@ def process_files(file_list, label):
             print(f"  [ERR] {filepath}: {e}")
     return results
 
-# Purpose : Creates a figure showing every sample's time-domain waveform and
-#           FFT spectrum side by side, one row per sample. Called twice —
-#           once for AI voices, once for Human voices.
-# Input   : results     — list of result dictionaries from process_files
-#           group_label — title shown at the top (e.g. "AI Voices")
-#           color_time  — colour for the waveform plots (hex string)
-#           color_fft   — colour for the FFT plots (hex string)
-# Output  : none — adds a figure to the matplotlib plot queue
-def plot_waveforms_and_ffts(results, group_label, color_time, color_fft):
-    n = len(results)
-    fig, axes = plt.subplots(n, 2, figsize=(14, 2.5 * n))
-    fig.suptitle(f"{group_label} — Time Signals & FFT Spectra", fontsize=14)
+def plot_waveforms_and_ffts(results, group_label, chunk_size=4):
+    for start in range(0, len(results), chunk_size):
+        chunk = results[start:start + chunk_size]
+        n = len(chunk)
+        fig, axes = plt.subplots(n, 2, figsize=(14, 3 * n))
+        fig.suptitle(f"{group_label} — Time Signals & FFT Spectra ({start+1}-{start+n})", fontsize=12)
+        for i, r in enumerate(chunk):
+            time = np.arange(len(r["signal"])) / r["sample_rate"]
+            axes[i, 0].plot(time, r["signal"], linewidth=0.5)
+            axes[i, 0].set_title(r["name"])
+            axes[i, 0].set_ylabel("Amplitude")
+            axes[i, 0].set_xlabel("Time [s]")
+            axes[i, 0].grid(alpha=0.4)
+            axes[i, 1].plot(r["freqs"], r["magnitude"], linewidth=0.5)
+            axes[i, 1].set_title(r["name"])
+            axes[i, 1].set_ylabel("Magnitude")
+            axes[i, 1].set_xlabel("Frequency [Hz]")
+            axes[i, 1].set_xlim(0, 8000)
+            axes[i, 1].grid(alpha=0.4)
+        plt.tight_layout()
 
-    for i, r in enumerate(results):
-        time = np.arange(len(r["signal"])) / r["sr"]
-
-        # Time domain
-        axes[i, 0].plot(time, r["signal"], linewidth=0.4, color=color_time)
-        axes[i, 0].set_title(r["name"], fontsize=9)
-        axes[i, 0].set_ylabel("Amplitude", fontsize=8)
-        axes[i, 0].set_xlabel("Time [s]", fontsize=8)
-        axes[i, 0].tick_params(labelsize=7)
-        axes[i, 0].grid(alpha=0.4)
-
-        # Frequency domain
-        axes[i, 1].plot(r["freqs"], r["mag"], linewidth=0.4, color=color_fft)
-        axes[i, 1].set_title(r["name"], fontsize=9)
-        axes[i, 1].set_ylabel("Magnitude", fontsize=8)
-        axes[i, 1].set_xlabel("Frequency [Hz]", fontsize=8)
-        axes[i, 1].set_xlim(0, 8000)
-        axes[i, 1].tick_params(labelsize=7)
-        axes[i, 1].grid(alpha=0.4)
-
-    plt.tight_layout(rect=[0, 0, 1, 0.97], h_pad=3.5)
-
-# Purpose : Box plots showing the distribution of all 5 features across AI vs
-#           Human samples. Use this to visually identify which features separate
-#           the two groups most clearly.
-# Input   : ai_results    — list of result dictionaries for AI files
-#           human_results — list of result dictionaries for Human files
-# Output  : none — adds a figure to the matplotlib plot queue
 def plot_feature_distributions(ai_results, human_results):
-    feature_names = list(ai_results[0]["feats"].keys())
-    n_feats = len(feature_names)
-
-    fig, axes = plt.subplots(1, n_feats, figsize=(4 * n_feats, 5))
-    fig.suptitle("Feature Distributions: AI vs Human", fontsize=14)
-
+    feature_names = list(ai_results[0]["features"].keys())
+    fig, axes = plt.subplots(1, len(feature_names), figsize=(4 * len(feature_names), 5))
+    fig.suptitle("Feature Distributions: AI vs Human", fontsize=12)
     for ax, feat in zip(axes, feature_names):
-        ai_vals    = [r["feats"][feat] for r in ai_results]
-        human_vals = [r["feats"][feat] for r in human_results]
-
-        bp = ax.boxplot(
-            [ai_vals, human_vals],
-            labels=["AI", "Human"],
-            patch_artist=True,
-            medianprops=dict(color="black", linewidth=2),
-        )
+        ai_vals    = [r["features"][feat] for r in ai_results]
+        human_vals = [r["features"][feat] for r in human_results]
+        bp = ax.boxplot([ai_vals, human_vals], labels=["AI", "Human"], patch_artist=True)
         bp["boxes"][0].set_facecolor("#4a90d9")
         bp["boxes"][1].set_facecolor("#e87040")
-
-        for j, vals in enumerate([ai_vals, human_vals], start=1):
-            ax.scatter(
-                np.full(len(vals), j) + np.random.uniform(-0.08, 0.08, len(vals)),
-                vals, zorder=3, s=30,
-                color=["#4a90d9", "#e87040"][j - 1], edgecolors="white", linewidths=0.5
-            )
-
-        ax.set_title(feat.replace("_", " ").title(), fontsize=10)
+        ax.set_title(feat.replace("_", " ").title())
         ax.grid(axis="y", alpha=0.4)
-
     plt.tight_layout()
 
-# Purpose : Renders a colour-coded table showing every sample and all 5 feature
-#           values. AI rows are shown in blue, Human rows in orange.
-#           There is no prediction column — this is purely for exploring the data.
-# Input   : ai_results    — list of result dictionaries for AI files
-#           human_results — list of result dictionaries for Human files
-# Output  : none — adds a figure to the matplotlib plot queue
 def plot_feature_table(ai_results, human_results):
-    all_results   = ai_results + human_results
-    feature_names = list(all_results[0]["feats"].keys())
-
-    col_labels = ["Sample", "Label"] + \
-                 [f.replace("_", " ").title() for f in feature_names]
-
-    rows = []
-    for r in all_results:
-        row = [r["name"], r["label"]]
-        row += [f"{r['feats'][f]:.4f}" for f in feature_names]
-        rows.append(row)
-
-    fig, ax = plt.subplots(figsize=(max(14, 2 * len(col_labels)), 0.45 * len(rows) + 2))
-    ax.axis("off")
-    fig.suptitle("Feature Values — All Samples (no classifier)", fontsize=13, y=0.98)
-
-    table = ax.table(
-        cellText=rows,
-        colLabels=col_labels,
-        cellLoc="center",
-        loc="center",
-    )
-    table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    table.scale(1, 1.5)
-
-    # Colour header row
-    for j in range(len(col_labels)):
-        table[0, j].set_facecolor("#8b0000")
-        table[0, j].set_text_props(color="white", fontweight="bold")
-
-    # Colour rows by label: blue for AI, orange for Human
-    for i, r in enumerate(all_results, start=1):
-        row_color = "#dce8f5" if r["label"] == "AI" else "#fdebd0"
+    for group, results in [("AI", ai_results), ("Human", human_results)]:
+        feature_names = list(results[0]["features"].keys())
+        col_labels = ["Sample"] + [f.replace("_", " ").title() for f in feature_names]
+        rows = [[r["name"]] + [f"{r['features'][f]:.4f}" for f in feature_names] for r in results]
+        fig, ax = plt.subplots(figsize=(max(12, 2 * len(col_labels)), 0.45 * len(rows) + 2))
+        ax.axis("off")
+        fig.suptitle(f"Feature Values — {group}", fontsize=12)
+        table = ax.table(cellText=rows, colLabels=col_labels, cellLoc="center", loc="center")
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.5)
         for j in range(len(col_labels)):
-            table[i, j].set_facecolor(row_color)
-
-    plt.tight_layout()
+            table[0, j].set_facecolor("#8b0000")
+            table[0, j].set_text_props(color="white", fontweight="bold")
+        plt.tight_layout()
 
 
 if __name__ == "__main__":
@@ -253,8 +186,8 @@ if __name__ == "__main__":
         print("\nGenerating plots…")
 
         # Per-sample waveforms + FFTs
-        plot_waveforms_and_ffts(ai_results,    "AI Voices",    "#4a90d9", "#f0c040")
-        plot_waveforms_and_ffts(human_results, "Human Voices", "#e87040", "#6abf69")
+        plot_waveforms_and_ffts(ai_results,    "AI Voices")
+        plot_waveforms_and_ffts(human_results, "Human Voices")
 
         # Feature distribution box plots
         plot_feature_distributions(ai_results, human_results)
