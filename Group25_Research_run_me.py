@@ -3,11 +3,17 @@ import matplotlib.pyplot as plt # plotting library
 import librosa # library that analyses audio
 
 
+# ── Input audio files ─────────────────────────────────────────────────────────────
+
 
 AI_FILES = ["Ai1.wav", "Ai2.mp3", "Ai3.mp3", "Ai4.wav", "Ai5.wav", "Ai6.wav", "Ai7.wav"]
 
 HUMAN_FILES = ["Human1.mp3", "Human2.mp3", "Human3.mp3", "Human4.mp3", "Human5.mp3",
                "Human6.mp3", "Human7.mp3",]
+
+
+# ── Variables ─────────────────────────────────────────────────────────────
+
 
 DURATION_SEC = 5      # seconds of audio to analyse per file, if audio is longer than 10 min,
 # a FFT_size should be implemented here and in function compute_fft. However, since the
@@ -17,14 +23,9 @@ ROLLOFF_PERC = 0.85   # spectral rolloff threshold, could be changed, however si
 # comparing Ai relative to Human, the exact value matters little.
 
 
+# ── Main functions ─────────────────────────────────────────────────────────────
 
-# Purpose : Reads one audio file from disk, removes silence, and trims it to
-#           a fixed length so every sample is comparable. If there is no audio, 
-#           an error is raised.
-# Input   : filepath     — path to the audio file
-#           duration_sec — how many seconds to keep 
-# Output  : signal — 1-D numpy array of normalised amplitude values
-#           sr     — sample rate in Hz
+
 def load_audio(filepath, duration_sec):
     signal, sample_rate = librosa.load(filepath, sr=None, mono=True)
     signal, _ = librosa.effects.trim(signal, top_db=20)
@@ -41,15 +42,6 @@ def load_audio(filepath, duration_sec):
     signal = signal / (np.max(np.abs(signal)) + 1e-10)
     return signal, sample_rate
 
-# Purpose : Converts a time-domain signal into the frequency domain using the
-#           Discrete Fourier Transform. A Hann window is applied first to
-#           prevent spectral leakage at the edges of the signal. Only the positive signals
-#           are evaluated. 
-# Input   : signal — 1-D array of amplitude values (from load_audio)
-#           sr     — sample rate in Hz (from load_audio)
-#           n_fft  — FFT size; if None the full signal length is used
-# Output  : freqs — 1-D array of frequency values in Hz for each FFT bin
-#           mag   — 1-D array of magnitudes (how strong each frequency is)
 
 def compute_fft(signal, sample_rate):
     N = len(signal)
@@ -59,13 +51,6 @@ def compute_fft(signal, sample_rate):
     freqs      = np.fft.fftfreq(N, d=1 / sample_rate)[: N // 2]
     return freqs, magnitude
 
-# Purpose : Computes all 5 features from the FFT output for exploration.
-#           No classifier is applied here — the goal is just to see the numbers.
-# Input   : signal — 1-D array of amplitude values (from load_audio)
-#           sr     — sample rate in Hz
-#           freqs  — 1-D array of frequency values in Hz (from compute_fft)
-#           mag    — 1-D array of FFT magnitudes (from compute_fft)
-# Output  : dictionary with 5 float values, one per feature
 
 def extract_features( freqs, mag):
     magnitude_safe  = mag + 1e-10
@@ -90,13 +75,6 @@ def extract_features( freqs, mag):
         "spectral_rolloff":  spec_rolloff,
         "spectral_bandwidth": spec_bandwidth}
 
-# Purpose : Runs the full pipeline (load → FFT → features) on every file in a
-#           list. No classification is performed — just feature extraction.
-#           Stores signal and FFT data so they can be plotted later.
-# Input   : file_list — list of filename stems
-#           label     — "AI" or "Human", stored for reference in the plots
-# Output  : list of result dictionaries, one per file, each containing:
-#             name, label, signal, sr, freqs, mag, feats
 
 def process_files(file_list, label):
     results = []
@@ -118,6 +96,10 @@ def process_files(file_list, label):
         except Exception as e:
             print(f"  [ERR] {filepath}: {e}")
     return results
+
+
+# ── Plots ─────────────────────────────────────────────────────────────
+
 
 def plot_waveforms_and_ffts(results, group_label, chunk_size=4):
     for start in range(0, len(results), chunk_size):
@@ -147,7 +129,7 @@ def plot_feature_distributions(ai_results, human_results):
     for ax, feat in zip(axes, feature_names):
         ai_vals    = [r["features"][feat] for r in ai_results]
         human_vals = [r["features"][feat] for r in human_results]
-        bp = ax.boxplot([ai_vals, human_vals], labels=["AI", "Human"], patch_artist=True)
+        bp = ax.boxplot([ai_vals, human_vals], tick_labels=["AI", "Human"], patch_artist=True)
         bp["boxes"][0].set_facecolor("#4a90d9")
         bp["boxes"][1].set_facecolor("#e87040")
         ax.set_title(feat.replace("_", " ").title())
@@ -170,6 +152,9 @@ def plot_feature_table(ai_results, human_results):
             table[0, j].set_facecolor("#8b0000")
             table[0, j].set_text_props(color="white", fontweight="bold")
         plt.tight_layout()
+
+
+# ── Main Text ─────────────────────────────────────────────────────────────
 
 
 if __name__ == "__main__":
